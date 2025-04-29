@@ -14,16 +14,19 @@ import ch.agsl.dynarapid.modules.Node;
 import ch.agsl.dynarapid.modules.Shape;
 import ch.agsl.dynarapid.parser.LocationParser;
 import ch.agsl.dynarapid.strings.StringUtils;
-
 import com.xilinx.rapidwright.design.Design;
+import com.xilinx.rapidwright.design.DesignTools;
 import com.xilinx.rapidwright.design.Module;
+import com.xilinx.rapidwright.design.NetType;
 import com.xilinx.rapidwright.edif.EDIFCell;
 import com.xilinx.rapidwright.edif.EDIFDirection;
+import com.xilinx.rapidwright.edif.EDIFHierCellInst;
 import com.xilinx.rapidwright.edif.EDIFNet;
 import com.xilinx.rapidwright.edif.EDIFPort;
+import com.xilinx.rapidwright.edif.EDIFTools;
 import com.xilinx.rapidwright.examples.SLRCrosserGenerator;
-
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -33,9 +36,10 @@ import java.util.concurrent.TimeUnit;
 
 public class GraphPlacer {
     
-    //This is teh actual placer. Requires the nodes from the placer algorithm
+    //This is the actual placer. Requires the nodes from the placer algorithm
     //The complete param tells if the design is to be routed completely or partially
-    public static boolean graphPlacer(Map<String, Node> nodes, String graphName, boolean complete, int threads, boolean debug, boolean noClock)
+    public static boolean graphPlacer(Map<String, Node> nodes, String graphName, boolean complete, int threads,
+            boolean debug, boolean noClock, Design abstractShell)
     {
         //////////////////////////////////////////////////////////////////////////////////////////////////////
         if(!TimeProfiler.addAndStartTimeElement("Module Loading", "Graph Stitching"))
@@ -120,7 +124,7 @@ public class GraphPlacer {
         }
         else
         {
-            EDIFPort clkPort = top.createPort(DesignPorts.CLK, EDIFDirection.INPUT, 1);
+            EDIFPort clkPort = top.createPort(DesignPorts.CLK + "in", EDIFDirection.INPUT, 1);
             clkNet = top.createNet(DesignPorts.CLK);
             clkNet.createPortInst(clkPort);
         }
@@ -193,18 +197,82 @@ public class GraphPlacer {
 
         if(!TimeProfiler.endTimeElement("Stitching Peripherals"))
             return false;
-		
+
+        ////////////////////////////////////////////////////////////////////////////////////////////
+
+        
+        // Find black box
+        EDIFHierCellInst blackBox = null;
+        for (EDIFHierCellInst i : abstractShell.getNetlist().getAllLeafHierCellInstances(true)) {
+            if (i.getInst().isBlackBox()) {
+                blackBox = i;
+                break;
+            }
+        }
+
+        EDIFCell kernelTop = design.getTopEDIFCell();
+        EDIFCell blackBoxTop = blackBox.getCellType();
+
+        // Remove unnecessary ports
+        for (EDIFPort port : new ArrayList<>(kernelTop.getPorts())) {
+            boolean removePort = (port.getName().contains("useless_net") && blackBoxTop.getPort(port.getName()) == null)
+                    || (port.getName().equals("clkout") && blackBoxTop.getPort("clkout") == null);
+            if (removePort) {
+                if (port.isBus()) {
+                    for (int i = 0; i < port.getWidth(); i++) {
+                        String portInstName = port.getPortInstNameFromPort(i);
+                        EDIFNet net = kernelTop.getInternalNet(portInstName);
+                        if (net != null) {
+                            net.removePortInst(null, portInstName);
+                        }
+                    }
+                } else {
+                    String portInstName = port.getPortInstNameFromPort(-1);
+                    EDIFNet net = kernelTop.getInternalNet(portInstName);
+                    if (net != null) {
+                        net.removePortInst(null, portInstName);
+                    }
+                }
+                kernelTop.removePort(port);
+            }
+        }
+        // Add ports to the kernel that are missing and tie to GND
+        EDIFNet gnd = EDIFTools.getStaticNet(NetType.GND, kernelTop, kernelTop.getNetlist());
+        for (EDIFPort port : blackBoxTop.getPorts()) {
+            if (kernelTop.getPort(port.getBusName()) == null) {
+                EDIFPort newPort = kernelTop.addPort(new EDIFPort(port));
+                if (newPort.isOutput()) {
+                    // Tie to GND
+                    if (newPort.isBus()) {
+                        for (int i = 0; i < newPort.getWidth(); i++) {
+                            gnd.createPortInst(newPort, i);
+                        }
+                    } else {
+                        gnd.createPortInst(newPort);
+                    }
+                }
+            }
+        }
+
+        // Populate black box with DynaRapid kernel
+        boolean keepBoundaryRouting = true;
+        DesignTools.populateBlackBox(abstractShell, blackBox.getFullHierarchicalInstName(), design,
+                keepBoundaryRouting);
         //////////////////////////////////////////////////////////////////////////////////////////////////////
 
-        if(!TimeProfiler.addAndStartTimeElement("Routing Design", "Graph Stitching"))
+        if (!TimeProfiler.addAndStartTimeElement("Routing Design", "Graph Stitching"))
             return false;
-        
-        //Starting the routing of the design
-        Path dcpFile = GenerateDesign.getDefaultOutputDCPPath(graphName);
-        if(!complete)
-            return GenerateRouted.routeDesignPartially(design, dcpFile);
 
-        else 
-            return GenerateRouted.routeDesignFully(design, dcpFile);
+        // Starting the routing of the design
+        Path dcpFile = GenerateDesign.getDefaultOutputDCPPath(graphName);
+
+        // TODO Remove once router works
+        abstractShell.writeCheckpoint(dcpFile.toString().replace("_routed.dcp", "_placed.dcp"));
+
+        if (!complete)
+            return GenerateRouted.routeDesignPartially(abstractShell, dcpFile);
+
+        else
+            return GenerateRouted.routeDesignFully(abstractShell, dcpFile);
     }
 }

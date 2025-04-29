@@ -22,10 +22,9 @@ import ch.agsl.dynarapid.placer.GreedyPlacer;
 import ch.agsl.dynarapid.placer.Placer;
 import ch.agsl.dynarapid.placer.RudimentaryPlacer;
 import ch.agsl.dynarapid.strings.StringUtils;
-
+import com.xilinx.rapidwright.design.Design;
 import com.xilinx.rapidwright.util.FileTools;
 import com.xilinx.rapidwright.util.VivadoTools;
-
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -140,6 +139,7 @@ public class GenerateDesign {
         {
             System.out.println("<usage>: java GenerateDesign [-f] [-place] [-placer]");
             System.out.println("-f <arg> - Location of the .dot file.");
+            System.out.println("-a <arg> - Location of the abstract shell DCP.");
             System.out.println("-debug - Runs the toolflow in debug mode generating more information and files.");
             System.out.println("-complete - Rips out the design and then routes it completely");
             System.out.println("-constrain - Allows you to start the design constrain flow to constrain the design within a specific boundary on the fabric.");
@@ -160,6 +160,7 @@ public class GenerateDesign {
         }
     
         String dotLoc = args[StringUtils.findInArray("-f", args) + 1];
+        String abstractShell = args[StringUtils.findInArray("-a", args) + 1];
         String graphName = StringUtils.getGraphName(dotLoc);
 
         String placeLoc = "";
@@ -578,8 +579,10 @@ public class GenerateDesign {
             return;
         }
 
+        Design absShell = abstractShell != null ? Design.readCheckpoint(abstractShell) : null;
+
         StringUtils.printIntro("Starting graph placement and stitching");
-        if(!GraphPlacer.graphPlacer(nodes, graphName, complete, threads, debug, noClock))
+        if (!GraphPlacer.graphPlacer(nodes, graphName, complete, threads, debug, noClock, absShell))
         {
             System.out.println("ERROR: Could not place graph on FPGA. See above logs");
             deleteDirectory(sourceDir);
