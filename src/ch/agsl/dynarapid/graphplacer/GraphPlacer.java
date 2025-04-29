@@ -18,6 +18,8 @@ import com.xilinx.rapidwright.design.Design;
 import com.xilinx.rapidwright.design.DesignTools;
 import com.xilinx.rapidwright.design.Module;
 import com.xilinx.rapidwright.design.NetType;
+import com.xilinx.rapidwright.design.blocks.PBlock;
+import com.xilinx.rapidwright.eco.LUT1InsertionTool;
 import com.xilinx.rapidwright.edif.EDIFCell;
 import com.xilinx.rapidwright.edif.EDIFDirection;
 import com.xilinx.rapidwright.edif.EDIFHierCellInst;
@@ -212,8 +214,13 @@ public class GraphPlacer {
 
         EDIFCell kernelTop = design.getTopEDIFCell();
         EDIFCell blackBoxTop = blackBox.getCellType();
-
-        // Remove unnecessary ports
+        
+        PBlock pblock = new PBlock(design.getDevice(),
+                "URAM288_X0Y0:URAM288_X0Y31 RAMB36_X0Y0:RAMB36_X2Y23 RAMB18_X0Y0:RAMB18_X2Y47 PCIE40E4_X0Y0:PCIE40E4_X0Y1 IOB_X1Y0:IOB_X1Y103 GTHE4_COMMON_X0Y0:GTHE4_COMMON_X0Y1 GTHE4_CHANNEL_X0Y0:GTHE4_CHANNEL_X0Y7 BUFG_GT_X0Y0:BUFG_GT_X0Y47 SLICE_X17Y0:SLICE_X60Y119 BUFG_GT_SYNC_X0Y0:BUFG_GT_SYNC_X0Y29 DSP48E2_X4Y0:DSP48E2_X12Y47");
+        LUT1InsertionTool lutInserter = new LUT1InsertionTool(design, pblock,
+                design.getDevice().getSite("SLICE_X17Y91"));
+        
+        // Remove unnecessary ports and tie off inputs
         for (EDIFPort port : new ArrayList<>(kernelTop.getPorts())) {
             boolean removePort = (port.getName().contains("useless_net") && blackBoxTop.getPort(port.getName()) == null)
                     || (port.getName().equals("clkout") && blackBoxTop.getPort("clkout") == null);
@@ -249,6 +256,23 @@ public class GraphPlacer {
                         }
                     } else {
                         gnd.createPortInst(newPort);
+                    }
+                } else {
+                    // We need to attach a LUT1 as a sink (presumably for DFX safety)
+                    if (port.isBus()) {
+                        for (int i = 0; i < port.getWidth(); i++) {
+                            String portInstName = port.getPortInstNameFromPort(i);
+                            EDIFNet net = kernelTop.getInternalNet(portInstName);
+                            if (net == null) {
+                                lutInserter.insertLUT1(portInstName, port, i);
+                            }
+                        }
+                    } else {
+                        String portInstName = port.getPortInstNameFromPort(-1);
+                        EDIFNet net = kernelTop.getInternalNet(portInstName);
+                        if (net == null) {
+                            lutInserter.insertLUT1(portInstName, port, -1);
+                        }
                     }
                 }
             }
