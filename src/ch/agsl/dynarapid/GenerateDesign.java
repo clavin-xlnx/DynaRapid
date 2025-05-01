@@ -23,6 +23,7 @@ import ch.agsl.dynarapid.placer.Placer;
 import ch.agsl.dynarapid.placer.RudimentaryPlacer;
 import ch.agsl.dynarapid.strings.StringUtils;
 import com.xilinx.rapidwright.design.Design;
+import com.xilinx.rapidwright.tests.CodePerfTracker;
 import com.xilinx.rapidwright.util.FileTools;
 import com.xilinx.rapidwright.util.VivadoTools;
 import java.io.File;
@@ -131,7 +132,8 @@ public class GenerateDesign {
 
     public static void main(String args[]) throws IOException
     {
-
+        CodePerfTracker cpt = new CodePerfTracker("DynaRapid", false);
+        cpt.start("Init");
         if(!TimeProfiler.addAndStartTimeElement("Design Generation", ""))
             return;
 
@@ -321,6 +323,8 @@ public class GenerateDesign {
             return;
         }
 
+        cpt.stop().start("Stitching");
+        
         ////////////////////////////////////////////////////////////////////////////////////////////////////// 
         if(!TimeProfiler.addAndStartTimeElement("Environment Creation", "Design Generation"))
             return;
@@ -579,10 +583,17 @@ public class GenerateDesign {
             return;
         }
 
-        Design absShell = abstractShell != null ? Design.readCheckpoint(abstractShell) : null;
+        Design absShell = null;
+        cpt.stop();
+        if (abstractShell != null) {
+            cpt.start("Read Abstract Shell DCP");
+            absShell = Design.readCheckpoint(abstractShell, CodePerfTracker.SILENT);
+            cpt.stop();
+        }
+        cpt.start("Placement");
 
         StringUtils.printIntro("Starting graph placement and stitching");
-        if (!GraphPlacer.graphPlacer(nodes, graphName, complete, threads, debug, noClock, absShell))
+        if (!GraphPlacer.graphPlacer(nodes, graphName, complete, threads, debug, noClock, absShell, cpt))
         {
             System.out.println("ERROR: Could not place graph on FPGA. See above logs");
             deleteDirectory(sourceDir);
@@ -614,16 +625,22 @@ public class GenerateDesign {
 
         int bitOptionIdx = StringUtils.findInArray("-bit", args);
         if (bitOptionIdx != -1) {
+            cpt.start("Write Bit");
             // Use Vivado to generate a bitstream if it is on PATH
             if (FileTools.isVivadoOnPath()) {
                 Path bitFile = Paths.get(args[bitOptionIdx + 1]);
                 Path dcpFile = getDefaultOutputDCPPath(graphName);
-                VivadoTools.writeBitstream(dcpFile, bitFile, false);                
+                boolean hasEncryptedCells = !absShell.getNetlist().getEncryptedCells().isEmpty();
+                String rmCell = absShell.getNetlist().getDesign().getProperty(GraphPlacer.RMCELL).getValue();
+                VivadoTools.writeBitstream(dcpFile, bitFile, hasEncryptedCells, null, rmCell);
             } else {
                 System.out.println("[WARNING]: Cannot use Vivado to generate bitstream, "
                         + "could not find 'vivado' on PATH.");
             }
+            cpt.stop();
         }
+
+        cpt.printSummary();
 
         ErrorLogger.printErrorLogs();
     }

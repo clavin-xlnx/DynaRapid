@@ -11,13 +11,12 @@ package ch.agsl.dynarapid.entry;
 import ch.agsl.dynarapid.GenerateDesign;
 import ch.agsl.dynarapid.parser.LocationParser;
 import ch.agsl.dynarapid.strings.StringUtils;
-
 import com.xilinx.rapidwright.design.Design;
 import com.xilinx.rapidwright.design.DesignTools;
 import com.xilinx.rapidwright.edif.EDIFTools;
 import com.xilinx.rapidwright.rwroute.PartialRouter;
 import com.xilinx.rapidwright.rwroute.RWRoute;
-
+import com.xilinx.rapidwright.tests.CodePerfTracker;
 import java.nio.file.Path;
 
 /** 
@@ -50,14 +49,16 @@ public class GenerateRouted {
     // }
     
     //This helps route the design partially and puts the design in the final location
-    public static boolean routeDesignPartially(Design design, Path finalLocation)
+    public static boolean routeDesignPartially(Design design, Path finalLocation, CodePerfTracker cpt)
     {
         StringUtils.printIntro("Started partial routing using RWRouter");
         design.flattenDesign();
         EDIFTools.uniqueifyNetlist(design);
         boolean softPreserve = true;
         design = PartialRouter.routeDesignPartialNonTimingDriven(design, null, softPreserve);
-        design.writeCheckpoint(finalLocation);
+        cpt.stop().start("Write DCP");
+        design.writeCheckpoint(finalLocation, CodePerfTracker.SILENT);
+        cpt.stop();
         return true;
     }
 
@@ -114,7 +115,7 @@ public class GenerateRouted {
             status = routeDesignFully(design, finalLoc);
 
         else    
-            status = routeDesignPartially(design, finalLoc);
+            status = routeDesignPartially(design, finalLoc, null);
 
         if(status)
             System.out.println("Completed Routing Design. You can find design in " + LocationParser.designs + " folder");

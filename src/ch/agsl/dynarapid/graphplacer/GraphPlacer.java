@@ -27,6 +27,7 @@ import com.xilinx.rapidwright.edif.EDIFNet;
 import com.xilinx.rapidwright.edif.EDIFPort;
 import com.xilinx.rapidwright.edif.EDIFTools;
 import com.xilinx.rapidwright.examples.SLRCrosserGenerator;
+import com.xilinx.rapidwright.tests.CodePerfTracker;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -37,11 +38,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public class GraphPlacer {
+
+    public static final String RMCELL = "RMCELL";
     
     //This is the actual placer. Requires the nodes from the placer algorithm
     //The complete param tells if the design is to be routed completely or partially
     public static boolean graphPlacer(Map<String, Node> nodes, String graphName, boolean complete, int threads,
-            boolean debug, boolean noClock, Design abstractShell)
+            boolean debug, boolean noClock, Design abstractShell, CodePerfTracker cpt)
     {
         //////////////////////////////////////////////////////////////////////////////////////////////////////
         if(!TimeProfiler.addAndStartTimeElement("Module Loading", "Graph Stitching"))
@@ -280,7 +283,9 @@ public class GraphPlacer {
 
         // Populate black box with DynaRapid kernel
         boolean keepBoundaryRouting = true;
-        DesignTools.populateBlackBox(abstractShell, blackBox.getFullHierarchicalInstName(), design,
+        String rmCell = blackBox.getFullHierarchicalInstName();
+        abstractShell.getNetlist().getDesign().addProperty("RMCELL", rmCell);
+        DesignTools.populateBlackBox(abstractShell, rmCell, design,
                 keepBoundaryRouting);
         //////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -290,11 +295,12 @@ public class GraphPlacer {
         // Starting the routing of the design
         Path dcpFile = GenerateDesign.getDefaultOutputDCPPath(graphName);
 
-        // TODO Remove once router works
-        abstractShell.writeCheckpoint(dcpFile.toString().replace("_routed.dcp", "_placed.dcp"));
+        // For debug: Write placement 
+        // abstractShell.writeCheckpoint(dcpFile.toString().replace("_routed.dcp", "_placed.dcp"));
+        cpt.stop().start("Routing");
 
         if (!complete)
-            return GenerateRouted.routeDesignPartially(abstractShell, dcpFile);
+            return GenerateRouted.routeDesignPartially(abstractShell, dcpFile, cpt);
 
         else
             return GenerateRouted.routeDesignFully(abstractShell, dcpFile);
