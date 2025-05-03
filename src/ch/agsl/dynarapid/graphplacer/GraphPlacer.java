@@ -230,7 +230,7 @@ public class GraphPlacer {
         for (EDIFPort port : new ArrayList<>(kernelTop.getPorts())) {
             boolean removePort = (port.getName().contains("useless_net") && blackBoxTop.getPort(port.getName()) == null)
                     || (port.getName().equals("clkout") && blackBoxTop.getPort("clkout") == null);
-            boolean extraPort = blackBoxTop.getPort(port.getName()) == null;
+            boolean extraPort = blackBoxTop.getPort(port.getBusName()) == null;
             if (removePort || extraPort) {
                 if (port.isBus()) {
                     for (int i = 0; i < port.getWidth(); i++) {
