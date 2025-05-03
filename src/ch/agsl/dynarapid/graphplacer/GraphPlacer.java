@@ -25,6 +25,7 @@ import com.xilinx.rapidwright.edif.EDIFDirection;
 import com.xilinx.rapidwright.edif.EDIFHierCellInst;
 import com.xilinx.rapidwright.edif.EDIFNet;
 import com.xilinx.rapidwright.edif.EDIFPort;
+import com.xilinx.rapidwright.edif.EDIFPortInst;
 import com.xilinx.rapidwright.edif.EDIFTools;
 import com.xilinx.rapidwright.examples.SLRCrosserGenerator;
 import com.xilinx.rapidwright.tests.CodePerfTracker;
@@ -224,16 +225,29 @@ public class GraphPlacer {
                 design.getDevice().getSite("SLICE_X17Y91"));
         
         // Remove unnecessary ports and tie off inputs
+        EDIFNet gnd = EDIFTools.getStaticNet(NetType.GND, kernelTop, kernelTop.getNetlist());
+        EDIFNet vcc = EDIFTools.getStaticNet(NetType.VCC, kernelTop, kernelTop.getNetlist());
         for (EDIFPort port : new ArrayList<>(kernelTop.getPorts())) {
             boolean removePort = (port.getName().contains("useless_net") && blackBoxTop.getPort(port.getName()) == null)
                     || (port.getName().equals("clkout") && blackBoxTop.getPort("clkout") == null);
-            if (removePort) {
+            boolean extraPort = blackBoxTop.getPort(port.getName()) == null;
+            if (removePort || extraPort) {
                 if (port.isBus()) {
                     for (int i = 0; i < port.getWidth(); i++) {
                         String portInstName = port.getPortInstNameFromPort(i);
                         EDIFNet net = kernelTop.getInternalNet(portInstName);
                         if (net != null) {
                             net.removePortInst(null, portInstName);
+                            if (port.isInput() && extraPort) {
+                                if (net.getSourcePortInsts(true).size() == 0) {
+                                    // There is no source, move all port insts to vcc
+                                    for (EDIFPortInst pi : new ArrayList<>(net.getPortInsts())) {
+                                        net.removePortInst(pi);
+                                        vcc.addPortInst(pi);
+                                    }
+
+                                }
+                            }
                         }
                     }
                 } else {
@@ -241,13 +255,22 @@ public class GraphPlacer {
                     EDIFNet net = kernelTop.getInternalNet(portInstName);
                     if (net != null) {
                         net.removePortInst(null, portInstName);
+                        if (port.isInput() && extraPort) {
+                            if (net.getSourcePortInsts(true).size() == 0) {
+                                // There is no source, move all port insts to vcc
+                                for (EDIFPortInst pi : new ArrayList<>(net.getPortInsts())) {
+                                    net.removePortInst(pi);
+                                    vcc.addPortInst(pi);
+                                }
+
+                            }
+                        }
                     }
                 }
                 kernelTop.removePort(port);
             }
         }
         // Add ports to the kernel that are missing and tie to GND
-        EDIFNet gnd = EDIFTools.getStaticNet(NetType.GND, kernelTop, kernelTop.getNetlist());
         for (EDIFPort port : blackBoxTop.getPorts()) {
             if (kernelTop.getPort(port.getBusName()) == null) {
                 EDIFPort newPort = kernelTop.addPort(new EDIFPort(port));
@@ -280,6 +303,8 @@ public class GraphPlacer {
                 }
             }
         }
+
+        // design.writeCheckpoint("gauss.dcp");
 
         // Populate black box with DynaRapid kernel
         boolean keepBoundaryRouting = true;
